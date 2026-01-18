@@ -38,5 +38,7 @@ wheels/
 Thumbs.db
 
 # Data cache
+.cache/
 cache/
 *.cache
+*.parquet
