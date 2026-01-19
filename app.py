@@ -11,17 +11,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from src.api import AssembleeNationaleAPI
+from src.utils.data_loader import OptimizedDataLoader
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_homepage_stats(legislature):
-    """Load basic stats for homepage - just counts, not all data"""
-    api = AssembleeNationaleAPI(legislature=legislature)
-    deputies = api.get_deputies()
-    # For homepage we just need the count, load a sample for speed
-    votes = api.get_votes(limit=100)
-    return deputies, votes, api.get_vote_count()
+    """Load basic stats for homepage using Parquet cache"""
+    loader = OptimizedDataLoader(legislature=legislature)
+    df_deputies = loader.get_deputies_df()
+    return df_deputies.to_dicts()
 
 
 # Custom CSS
@@ -103,7 +101,7 @@ Cette application vous permet d'explorer et de visualiser le travail législatif
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("### 👥 Députés")
+    st.page_link("pages/1_Députés.py", label="Députés", icon="👥")
     st.markdown(
         """
     - Liste complète des députés
@@ -114,7 +112,7 @@ with col1:
     )
 
 with col2:
-    st.markdown("### 📊 Activité des Députés")
+    st.page_link("pages/4_Activité.py", label="Activité des Députés", icon="📊")
     st.markdown(
         """
     - Nombre d'amendements par député
@@ -127,7 +125,7 @@ with col2:
 col3, col4 = st.columns(2)
 
 with col3:
-    st.markdown("### 📜 Législation")
+    st.page_link("pages/2_Législation.py", label="Législation", icon="📜")
     st.markdown(
         """
     - Dossiers législatifs
@@ -138,7 +136,7 @@ with col3:
     )
 
 with col4:
-    st.markdown("### 🗳️ Scrutins")
+    st.page_link("pages/3_Scrutins.py", label="Scrutins", icon="🗳️")
     st.markdown(
         """
     - Liste des votes
@@ -153,30 +151,24 @@ st.divider()
 # Quick statistics
 st.markdown("## Statistiques rapides")
 
-with st.spinner("Chargement des données..."):
-    try:
-        deputies, votes, total_votes = load_homepage_stats(legislature)
+try:
+    deputies = load_homepage_stats(legislature)
 
-        col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
-        with col1:
-            st.metric(
-                label="Nombre de députés", value=len(deputies) if deputies else "—"
-            )
+    with col1:
+        st.metric(label="Nombre de députés", value=len(deputies) if deputies else "—")
 
-        with col2:
-            groups = set()
-            for dep in deputies or []:
-                if isinstance(dep.get("groupe"), dict):
-                    sigle = dep["groupe"].get("sigle", "")
-                    if sigle:
-                        groups.add(sigle)
-            st.metric(label="Groupes politiques", value=len(groups) if groups else "—")
-
-        with col3:
-            st.metric(label="Scrutins", value=total_votes if total_votes else "—")
-    except Exception as e:
-        st.error(f"Erreur lors du chargement des statistiques: {str(e)}")
+    with col2:
+        groups = set()
+        for dep in deputies or []:
+            if isinstance(dep.get("groupe"), dict):
+                sigle = dep["groupe"].get("sigle", "")
+                if sigle:
+                    groups.add(sigle)
+        st.metric(label="Groupes politiques", value=len(groups) if groups else "—")
+except Exception as e:
+    st.error(f"Erreur lors du chargement des statistiques: {str(e)}")
 
 st.divider()
 
