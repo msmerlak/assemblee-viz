@@ -228,6 +228,22 @@ class AssembleeNationaleAPI:
         # For now, return empty as individual access requires different approach
         return {}
 
+    def _find_first_date(self, actes) -> str:
+        """Recursively find the first date in nested actesLegislatifs"""
+        if isinstance(actes, dict):
+            date = actes.get("dateActe")
+            if date:
+                return date
+            nested = actes.get("actesLegislatifs", {})
+            if nested:
+                return self._find_first_date(nested.get("acteLegislatif"))
+        elif isinstance(actes, list):
+            for a in actes:
+                d = self._find_first_date(a)
+                if d:
+                    return d
+        return ""
+
     def get_bills(
         self, legislature: Optional[int] = None, limit: int = 100
     ) -> List[Dict]:
@@ -255,28 +271,22 @@ class AssembleeNationaleAPI:
             if "dossierParlementaire" in item:
                 dossier = item["dossierParlementaire"]
 
-                # Extract date from actesLegislatifs if available
-                date_depot = ""
-                if dossier.get("initiateur"):
-                    date_depot = dossier.get("initiateur", {}).get("dateDepot", "")
-                elif dossier.get("actesLegislatifs"):
-                    # Try to find a date in the legislative acts
-                    actes = dossier.get("actesLegislatifs", {}).get(
-                        "acteLegislatif", {}
-                    )
-                    if isinstance(actes, dict):
-                        date_depot = actes.get("dateActe", "")
+                # Extract date from nested actesLegislatifs
+                actes = dossier.get("actesLegislatifs", {}).get("acteLegislatif")
+                date_depot = self._find_first_date(actes)
+                
+                # Get procedure type as status
+                procedure = dossier.get("procedureParlementaire", {})
+                statut = procedure.get("libelle", "")
 
                 bill_info = {
                     "uid": dossier.get("uid", ""),
                     "titre": dossier.get("titreDossier", {}).get("titre", ""),
-                    "type": dossier.get("procedureParlementaire", {}).get(
-                        "libelle", ""
-                    ),
+                    "type": statut,  # Use procedure type as the main type
                     "dateDepot": (
                         date_depot.split("T")[0] if date_depot else ""
                     ),  # Extract date part
-                    "statut": "",  # Status could be derived from procedure code
+                    "statut": statut,  # Same as type for now
                     "legislature": dossier.get("legislature", leg),
                 }
                 bills.append(bill_info)
