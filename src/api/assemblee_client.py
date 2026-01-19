@@ -315,6 +315,57 @@ class AssembleeNationaleAPI:
         print(f"Loaded {len(bills)} legislative dossiers")
         return bills
 
+    def get_bills_in_discussion(self, legislature: Optional[int] = None, limit: int = 10) -> List[Dict]:
+        """
+        Get bills currently being discussed in session (séance publique)
+        
+        Args:
+            legislature: Legislature number
+            limit: Max number of results
+            
+        Returns:
+            List of bills in discussion with author info
+        """
+        leg = legislature or self.legislature
+        url = f"{self.BASE_URL}/{leg}/loi/dossiers_legislatifs/Dossiers_Legislatifs.json.zip"
+        raw_data = self._download_and_extract_zip(url)
+        
+        in_discussion = []
+        for item in raw_data:
+            if len(in_discussion) >= limit:
+                break
+            if "dossierParlementaire" in item:
+                dossier = item["dossierParlementaire"]
+                actes = dossier.get("actesLegislatifs", {}).get("acteLegislatif")
+                statut = self._find_last_acte(actes)
+                
+                # Check if in discussion/debate
+                if "séance" in statut.lower() or "discussion" in statut.lower():
+                    uid = dossier.get("uid", "")
+                    titre = dossier.get("titreDossier", {}).get("titre", "")
+                    procedure = dossier.get("procedureParlementaire", {})
+                    type_texte = procedure.get("libelle", "")
+                    
+                    # Get author reference
+                    initiateur = dossier.get("initiateur", {})
+                    acteurs = initiateur.get("acteurs", {}).get("acteur") if initiateur else None
+                    acteur_ref = None
+                    if isinstance(acteurs, dict):
+                        acteur_ref = acteurs.get("acteurRef")
+                    elif isinstance(acteurs, list) and acteurs:
+                        acteur_ref = acteurs[0].get("acteurRef")
+                    
+                    in_discussion.append({
+                        "uid": uid,
+                        "titre": titre,
+                        "type": type_texte,
+                        "statut": statut,
+                        "acteurRef": acteur_ref,
+                        "legislature": leg,
+                    })
+        
+        return in_discussion
+
     def get_bill_details(self, bill_uid: str) -> Dict:
         """
         Get detailed information about a specific bill
