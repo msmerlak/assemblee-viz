@@ -244,6 +244,24 @@ class AssembleeNationaleAPI:
                     return d
         return ""
 
+    def _find_last_acte(self, actes, result=None) -> str:
+        """Recursively find the last acte (current stage) in nested actesLegislatifs"""
+        if result is None:
+            result = []
+        if isinstance(actes, dict):
+            libelle = actes.get("libelleActe", {})
+            if isinstance(libelle, dict):
+                libelle = libelle.get("nomCanonique", "") or libelle.get("libelleCourt", "")
+            if libelle:
+                result.append(libelle)
+            nested = actes.get("actesLegislatifs", {})
+            if nested:
+                self._find_last_acte(nested.get("acteLegislatif"), result)
+        elif isinstance(actes, list):
+            for a in actes:
+                self._find_last_acte(a, result)
+        return result[-1] if result else ""
+
     def get_bills(
         self, legislature: Optional[int] = None, limit: int = 100
     ) -> List[Dict]:
@@ -275,18 +293,21 @@ class AssembleeNationaleAPI:
                 actes = dossier.get("actesLegislatifs", {}).get("acteLegislatif")
                 date_depot = self._find_first_date(actes)
                 
-                # Get procedure type as status
+                # Get procedure type (e.g., "Proposition de loi ordinaire")
                 procedure = dossier.get("procedureParlementaire", {})
-                statut = procedure.get("libelle", "")
+                type_texte = procedure.get("libelle", "")
+                
+                # Get current stage from last acte (e.g., "Renvoi en commission")
+                statut = self._find_last_acte(actes)
 
                 bill_info = {
                     "uid": dossier.get("uid", ""),
                     "titre": dossier.get("titreDossier", {}).get("titre", ""),
-                    "type": statut,  # Use procedure type as the main type
+                    "type": type_texte,
                     "dateDepot": (
                         date_depot.split("T")[0] if date_depot else ""
                     ),  # Extract date part
-                    "statut": statut,  # Same as type for now
+                    "statut": statut,  # Current stage/status
                     "legislature": dossier.get("legislature", leg),
                 }
                 bills.append(bill_info)
