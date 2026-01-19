@@ -28,7 +28,7 @@ def load_votes(legislature):
     """Load votes data with caching"""
     api = AssembleeNationaleAPI(legislature=legislature)
     votes = api.get_votes(limit=None)  # All votes
-    return votes_to_dataframe(votes), votes
+    return votes_to_dataframe(votes, legislature=legislature), votes
 
 
 # Sidebar controls
@@ -363,7 +363,7 @@ with st.spinner("Chargement des scrutins..."):
             # Display results count
             st.caption(f"Affichage de {len(filtered_df)} scrutins sur {len(df_votes)}")
 
-            # Select columns to display
+            # Select columns to display (include url for links)
             display_columns = [
                 "numero",
                 "date",
@@ -373,6 +373,7 @@ with st.spinner("Chargement des scrutins..."):
                 "nombre_pour",
                 "nombre_contre",
                 "nombre_abstentions",
+                "url",
             ]
             available_columns = [
                 col for col in display_columns if col in filtered_df.columns
@@ -389,15 +390,30 @@ with st.spinner("Chargement des scrutins..."):
                     "nombre_pour": "Pour",
                     "nombre_contre": "Contre",
                     "nombre_abstentions": "Abstentions",
+                    "url": "Lien",
                 }
 
-                display_df = filtered_df[available_columns].rename(columns=column_names)
+                display_df = filtered_df[available_columns].copy()
 
                 # Format date column
-                if "Date" in display_df.columns:
-                    display_df["Date"] = display_df["Date"].dt.strftime("%d/%m/%Y")
+                if "date" in display_df.columns:
+                    display_df["date"] = display_df["date"].dt.strftime("%d/%m/%Y")
+                
+                display_df = display_df.rename(columns=column_names)
 
-                st.dataframe(display_df, width="stretch", hide_index=True, height=600)
+                st.dataframe(
+                    display_df,
+                    width="stretch",
+                    hide_index=True,
+                    height=600,
+                    column_config={
+                        "Lien": st.column_config.LinkColumn(
+                            "Lien",
+                            display_text="Voir ↗",
+                            help="Ouvrir le scrutin sur assemblee-nationale.fr"
+                        )
+                    }
+                )
 
                 # Download button
                 csv = display_df.to_csv(index=False).encode("utf-8")

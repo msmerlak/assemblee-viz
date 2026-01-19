@@ -250,7 +250,8 @@ class AssembleeNationaleAPI:
         raw_data = self._download_and_extract_zip(url)
 
         bills = []
-        for item in raw_data[:limit]:  # Apply limit after loading
+        items_to_process = raw_data if limit is None else raw_data[:limit]
+        for item in items_to_process:
             if "dossierParlementaire" in item:
                 dossier = item["dossierParlementaire"]
 

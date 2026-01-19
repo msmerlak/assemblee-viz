@@ -63,13 +63,19 @@ def bills_to_dataframe(bills: List[Dict]) -> pd.DataFrame:
 
     processed = []
     for bill in bills:
+        uid = bill.get('uid', '')
+        legislature = bill.get('legislature', '')
+        # Build URL to the official Assemblée Nationale page
+        url = f"https://www.assemblee-nationale.fr/dyn/{legislature}/dossiers/{uid}" if uid and legislature else ''
+        
         processed.append({
-            'uid': bill.get('uid', ''),
+            'uid': uid,
             'titre': bill.get('titre', ''),
             'type': bill.get('type', ''),
             'date_depot': bill.get('dateDepot', ''),
             'statut': bill.get('statut', ''),
-            'legislature': bill.get('legislature', ''),
+            'legislature': legislature,
+            'url': url,
         })
 
     df = pd.DataFrame(processed)
@@ -81,12 +87,13 @@ def bills_to_dataframe(bills: List[Dict]) -> pd.DataFrame:
     return df
 
 
-def votes_to_dataframe(votes: List[Dict]) -> pd.DataFrame:
+def votes_to_dataframe(votes: List[Dict], legislature: int = 17) -> pd.DataFrame:
     """
     Convert list of votes to a structured DataFrame
 
     Args:
         votes: List of vote dictionaries from API
+        legislature: Legislature number for URL construction
 
     Returns:
         DataFrame with vote information
@@ -96,8 +103,12 @@ def votes_to_dataframe(votes: List[Dict]) -> pd.DataFrame:
 
     processed = []
     for vote in votes:
+        uid = vote.get('uid', '')
+        # Build URL to the official Assemblée Nationale page
+        url = f"https://www.assemblee-nationale.fr/dyn/{legislature}/scrutins/{uid}" if uid else ''
+        
         processed.append({
-            'uid': vote.get('uid', ''),
+            'uid': uid,
             'numero': vote.get('numero', ''),
             'date': vote.get('dateScrutin', ''),
             'titre': vote.get('titre', ''),
@@ -106,6 +117,7 @@ def votes_to_dataframe(votes: List[Dict]) -> pd.DataFrame:
             'nombre_pour': vote.get('decompte', {}).get('pour', 0) if isinstance(vote.get('decompte'), dict) else 0,
             'nombre_contre': vote.get('decompte', {}).get('contre', 0) if isinstance(vote.get('decompte'), dict) else 0,
             'nombre_abstentions': vote.get('decompte', {}).get('abstention', 0) if isinstance(vote.get('decompte'), dict) else 0,
+            'url': url,
         })
 
     df = pd.DataFrame(processed)

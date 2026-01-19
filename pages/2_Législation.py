@@ -25,27 +25,20 @@ st.markdown(f"**Législature**: {st.session_state.api_client.legislature}")
 
 # Load data
 @st.cache_data(ttl=3600)
-def load_bills(legislature, limit=200):
-    """Load bills data with caching"""
+def load_bills(legislature):
+    """Load all bills data with caching"""
     api = AssembleeNationaleAPI(legislature=legislature)
-    bills = api.get_bills(limit=limit)
+    bills = api.get_bills(limit=None)  # Load all bills
     return bills_to_dataframe(bills), bills
 
 # Sidebar controls
 with st.sidebar:
-    st.markdown("### Paramètres")
-    limit = st.slider(
-        "Nombre de dossiers à charger",
-        min_value=50,
-        max_value=500,
-        value=200,
-        step=50,
-        help="Plus de dossiers = temps de chargement plus long"
-    )
+    st.markdown("### Informations")
+    st.info("Chargement de tous les dossiers législatifs de la législature.")
 
 with st.spinner("Chargement des dossiers législatifs..."):
     try:
-        df_bills, raw_bills = load_bills(st.session_state.api_client.legislature, limit=limit)
+        df_bills, raw_bills = load_bills(st.session_state.api_client.legislature)
 
         if df_bills.empty:
             st.warning("Aucun dossier législatif disponible pour cette législature.")
@@ -278,8 +271,8 @@ with st.spinner("Chargement des dossiers législatifs..."):
             # Display results count
             st.caption(f"Affichage de {len(filtered_df)} dossiers sur {len(df_bills)}")
 
-            # Select columns to display
-            display_columns = ['titre', 'type', 'date_depot', 'statut', 'legislature']
+            # Select columns to display (include url for links)
+            display_columns = ['titre', 'type', 'date_depot', 'statut', 'url']
             available_columns = [col for col in display_columns if col in filtered_df.columns]
 
             if available_columns:
@@ -289,20 +282,29 @@ with st.spinner("Chargement des dossiers législatifs..."):
                     'type': 'Type',
                     'date_depot': 'Date de dépôt',
                     'statut': 'Statut',
-                    'legislature': 'Législature'
+                    'url': 'Lien'
                 }
 
-                display_df = filtered_df[available_columns].rename(columns=column_names)
-
+                display_df = filtered_df[available_columns].copy()
+                
                 # Format date column
-                if 'Date de dépôt' in display_df.columns:
-                    display_df['Date de dépôt'] = display_df['Date de dépôt'].dt.strftime('%d/%m/%Y')
+                if 'date_depot' in display_df.columns:
+                    display_df['date_depot'] = display_df['date_depot'].dt.strftime('%d/%m/%Y')
+                
+                display_df = display_df.rename(columns=column_names)
 
                 st.dataframe(
                     display_df,
                     width="stretch",
                     hide_index=True,
-                    height=600
+                    height=600,
+                    column_config={
+                        "Lien": st.column_config.LinkColumn(
+                            "Lien",
+                            display_text="Voir ↗",
+                            help="Ouvrir le dossier sur assemblee-nationale.fr"
+                        )
+                    }
                 )
 
                 # Download button
