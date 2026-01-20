@@ -7,7 +7,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from src.api import AssembleeNationaleAPI
 from src.utils.data_loader import OptimizedDataLoader
 
 st.set_page_config(
@@ -16,12 +15,11 @@ st.set_page_config(
     layout="wide",
 )
 
-# Initialize API client
-if "api_client" not in st.session_state:
-    st.session_state.api_client = AssembleeNationaleAPI(legislature=17)
+# Initialize loader
+legislature = 17
 
 st.title("📊 Activité des Députés")
-st.markdown(f"**Législature**: {st.session_state.api_client.legislature}")
+st.markdown(f"**Législature**: {legislature}")
 
 # Sidebar controls
 with st.sidebar:
@@ -52,9 +50,7 @@ def load_activity_data(legislature):
 
 with st.spinner("Chargement des données d'activité..."):
     try:
-        df_deputies, df_amendments, df_stats = load_activity_data(
-            st.session_state.api_client.legislature
-        )
+        df_deputies, df_amendments, df_stats = load_activity_data(legislature)
 
         if df_deputies.empty or df_amendments.empty:
             st.warning("Données non disponibles")
@@ -440,7 +436,7 @@ with st.spinner("Chargement des données d'activité..."):
             st.download_button(
                 label="Télécharger les données (CSV)",
                 data=csv,
-                file_name=f"activite_deputes_legislature_{st.session_state.api_client.legislature}.csv",
+                file_name=f"activite_deputes_legislature_{legislature}.csv",
                 mime="text/csv",
             )
 

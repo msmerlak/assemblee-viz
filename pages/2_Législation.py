@@ -343,7 +343,7 @@ with st.spinner("Chargement des dossiers législatifs..."):
                 st.download_button(
                     label="Télécharger les données (CSV)",
                     data=csv,
-                    file_name=f"legislation_legislature_{st.session_state.api_client.legislature}.csv",
+                    file_name=f"legislation_legislature_{legislature}.csv",
                     mime="text/csv",
                 )
             else:

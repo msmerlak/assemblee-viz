@@ -6,8 +6,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from src.api import AssembleeNationaleAPI
-from src.utils import deputies_to_dataframe, calculate_deputy_statistics
+from src.utils.data_loader import OptimizedDataLoader
+from src.utils import calculate_deputy_statistics
 
 st.set_page_config(
     page_title="Députés - Assemblée Nationale",
@@ -15,24 +15,23 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize API client
-if 'api_client' not in st.session_state:
-    st.session_state.api_client = AssembleeNationaleAPI(legislature=17)
+# Initialize loader
+legislature = 17
 
 st.title("👥 Députés de l'Assemblée Nationale")
-st.markdown(f"**Législature**: {st.session_state.api_client.legislature}")
+st.markdown(f"**Législature**: {legislature}")
 
 # Load data
 @st.cache_data(ttl=3600)
 def load_deputies(legislature):
-    """Load deputies data with caching"""
-    api = AssembleeNationaleAPI(legislature=legislature)
-    deputies = api.get_deputies()
-    return deputies_to_dataframe(deputies), deputies
+    """Load deputies data with Parquet caching"""
+    loader = OptimizedDataLoader(legislature=legislature)
+    df = loader.get_deputies_df()
+    return df.to_pandas(), df.to_dicts()
 
 with st.spinner("Chargement des données des députés..."):
     try:
-        df_deputies, raw_deputies = load_deputies(st.session_state.api_client.legislature)
+        df_deputies, raw_deputies = load_deputies(legislature)
 
         if df_deputies.empty:
             st.warning("Aucune donnée disponible pour cette législature.")
@@ -258,7 +257,7 @@ with st.spinner("Chargement des données des députés..."):
                 st.download_button(
                     label="Télécharger les données (CSV)",
                     data=csv,
-                    file_name=f"deputes_legislature_{st.session_state.api_client.legislature}.csv",
+                    file_name=f"deputes_legislature_{legislature}.csv",
                     mime="text/csv"
                 )
             else:

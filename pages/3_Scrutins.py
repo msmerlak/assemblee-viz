@@ -420,7 +420,7 @@ with st.spinner("Chargement des scrutins..."):
                 st.download_button(
                     label="Télécharger les données (CSV)",
                     data=csv,
-                    file_name=f"scrutins_legislature_{st.session_state.api_client.legislature}.csv",
+                    file_name=f"scrutins_legislature_{legislature}.csv",
                     mime="text/csv",
                 )
             else:
