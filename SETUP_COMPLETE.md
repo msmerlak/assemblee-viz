@@ -81,6 +81,23 @@ The application will open automatically at: `http://localhost:8501`
 - Detailed vote breakdown
 - Export to CSV
 
+### 📊 Activité
+- Deputy rankings by amendment activity
+- Success rate analysis (adopted vs rejected)
+- Statistics by political group
+- Detailed search by deputy
+- Export to CSV
+
+### 💬 Débats
+- List of recent parliamentary debates
+- Full debate text viewer
+- **NLP Analysis**:
+  - Sentiment analysis (positive/negative/neutral)
+  - Topic detection (economy, health, security, etc.)
+  - Keyword extraction
+  - Entity recognition (people, organizations, places)
+  - Speaker statistics
+
 ## Data Sources
 
 All data comes from the official Assemblée Nationale open data portal:
@@ -91,15 +108,25 @@ All data comes from the official Assemblée Nationale open data portal:
 
 ## Technical Details
 
-### Data Caching
-- Streamlit `@st.cache_data` with 1-hour TTL
-- Reduces load times on page refreshes
-- Minimizes API requests
+### Data Caching (Two-Layer System)
 
-### Data Loading Times
-- Deputies: ~5-10 seconds (575 deputies + 7000+ organes)
-- Votes: ~3-5 seconds (5000+ scrutins)
-- Bills: ~2-3 seconds (legislative dossiers)
+1. **Parquet Cache** (fast, for DataFrames):
+   - Deputies, amendments, bills, votes stored as `.parquet`
+   - 20-50x faster than JSON loading
+   - Located in `.cache/parquet/`
+
+2. **JSON Cache** (legacy, for raw API data):
+   - Debates and raw API responses
+   - Located in `.cache/assemblee_data/`
+
+- Streamlit `@st.cache_data` with 1-hour TTL on top
+- Cache expires after 24 hours
+
+### Data Loading Times (with Parquet cache)
+- Deputies: ~0.05 seconds
+- Amendments: ~0.1 seconds
+- Bills: ~0.05 seconds
+- Votes: ~0.1 seconds
 
 ### Legislature Selection
 The sidebar allows switching between legislatures:
@@ -161,13 +188,11 @@ pip install --upgrade -r requirements.txt
 ## Next Steps (Optional Enhancements)
 
 Potential future improvements:
-1. Add amendments (amendements) visualization
-2. Include debate transcripts analysis
-3. Add deputy activity metrics
-4. Create comparison views between legislatures
-5. Add export to multiple formats (PDF, Excel)
-6. Implement advanced filtering and search
-7. Add network graphs for co-signatures
+1. ML-based sentiment analysis (CamemBERT)
+2. Comparison views between legislatures
+3. Add export to multiple formats (PDF, Excel)
+4. Network graphs for co-signatures
+5. Automatic controversy detection
 
 ## Support
 
@@ -179,6 +204,7 @@ For issues with:
 ---
 
 **Status**: ✅ Production Ready
-**Last Updated**: January 18, 2026
+**Last Updated**: January 20, 2026
 **Legislature**: 17 (current)
 **Data Sources**: All operational
+**NLP**: French political discourse analysis enabled

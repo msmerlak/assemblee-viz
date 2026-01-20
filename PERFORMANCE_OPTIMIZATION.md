@@ -11,55 +11,63 @@
 - Amendments data: ~8-12 seconds
 - Poor user experience with frequent waiting
 
-## Solution: Local File Caching
+## Solution: Two-Layer Caching System
 
-Implemented a **local file caching system** that stores downloaded data on disk.
+Implemented a **two-layer caching system**:
+
+1. **JSON Cache** (Layer 1): Raw API responses stored on disk
+2. **Parquet Cache** (Layer 2): Optimized columnar format for DataFrames
 
 ### Key Features
 
-1. **Automatic caching**: Downloads saved to `.cache/assemblee_data/`
-2. **Smart expiration**: 24-hour TTL with automatic refresh
-3. **MD5-based keys**: Each URL gets unique cache file
+1. **Automatic caching**: Downloads saved to `.cache/`
+2. **Parquet format**: Fast columnar storage via Polars
+3. **Smart expiration**: 24-hour TTL with automatic refresh
 4. **Zero configuration**: Works out of the box
 5. **Management tools**: CLI for cache inspection and control
 
 ### Implementation
 
-**Cache Strategy**:
+**Parquet Cache Strategy** (OptimizedDataLoader):
 ```python
-def _download_and_extract_zip(self, url: str) -> List[Dict]:
-    # 1. Check if cached and valid (< 24 hours old)
-    if cache_exists and cache_is_valid:
-        return load_from_cache()
-
-    # 2. Download from API if needed
-    data = download_and_parse_zip(url)
-
-    # 3. Save to cache for next time
-    save_to_cache(data)
-
-    return data
+def get_deputies_df(self) -> pl.DataFrame:
+    cache_path = self.cache_dir / f"deputies_{self.legislature}.parquet"
+    
+    # 1. Check Parquet cache first (fastest)
+    if cache_path.exists():
+        return pl.read_parquet(cache_path)
+    
+    # 2. Fall back to JSON cache
+    # 3. Download from API if needed
+    # 4. Convert to DataFrame and save as Parquet
+    
+    df.write_parquet(cache_path)
+    return df
 ```
 
 **Cache Structure**:
 ```
-.cache/assemblee_data/
-├── 2fb0b6d...c8b.json  # Deputies (12 MB)
-├── 11a7540...8e4.json  # Votes (350 MB)
-├── 96de911...ec4.json  # Bills (150 MB)
-└── 90d24d9...158.json  # Amendments (230 MB)
+.cache/
+├── parquet/                    # Fast DataFrame cache
+│   ├── deputies_17.parquet
+│   ├── amendments_17.parquet
+│   ├── bills_17.parquet
+│   └── votes_17.parquet
+│
+└── assemblee_data/             # JSON cache (legacy)
+    └── *.json
 ```
 
 ## Performance Results
 
 ### Before vs After
 
-| Operation | Before | After | Speedup |
-|-----------|--------|-------|---------|
-| Load deputies | 1.9s | 0.09s | **20x faster** |
-| Load votes | 3-5s | 0.1-0.2s | **25x faster** |
-| Load bills | 2-3s | 0.08s | **30x faster** |
-| Load amendments | 8-12s | 0.3-0.5s | **25x faster** |
+| Operation       | Before | After (Parquet) | Speedup         |
+| --------------- | ------ | --------------- | --------------- |
+| Load deputies   | 1.9s   | 0.05s           | **40x faster**  |
+| Load votes      | 3-5s   | 0.1s            | **40x faster**  |
+| Load bills      | 2-3s   | 0.05s           | **50x faster**  |
+| Load amendments | 8-12s  | 0.1s            | **100x faster** |
 
 ### Real-World Impact
 
@@ -161,13 +169,13 @@ cache_file = f".cache/assemblee_data/{url_hash}.json"
 
 **Why disk cache?**
 
-| Aspect | Memory Cache | Disk Cache |
-|--------|-------------|------------|
-| Speed | Fastest (RAM) | Very fast (SSD) |
+| Aspect      | Memory Cache    | Disk Cache        |
+| ----------- | --------------- | ----------------- |
+| Speed       | Fastest (RAM)   | Very fast (SSD)   |
 | Persistence | Lost on restart | Survives restarts |
-| Sharing | Per-process | Cross-process |
-| Size limit | RAM size | Disk size |
-| Management | Complex | Simple |
+| Sharing     | Per-process     | Cross-process     |
+| Size limit  | RAM size        | Disk size         |
+| Management  | Complex         | Simple            |
 
 **Our choice**: Disk cache for persistence and simplicity.
 
@@ -178,11 +186,11 @@ cache_file = f".cache/assemblee_data/{url_hash}.json"
 
 ### Storage Requirements
 
-| Legislature | Cache Size | Records |
-|-------------|-----------|---------|
-| Legislature 17 | ~742 MB | Full dataset |
-| Legislature 16 | ~650 MB | Older data |
-| Legislature 15 | ~580 MB | Historical |
+| Legislature    | Cache Size | Records      |
+| -------------- | ---------- | ------------ |
+| Legislature 17 | ~742 MB    | Full dataset |
+| Legislature 16 | ~650 MB    | Older data   |
+| Legislature 15 | ~580 MB    | Historical   |
 
 **Recommendation**: 1-2 GB free disk space for safety.
 

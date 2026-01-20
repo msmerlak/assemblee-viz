@@ -12,7 +12,6 @@ st.set_page_config(
 )
 
 from src.utils.data_loader import OptimizedDataLoader
-from src.api import AssembleeNationaleAPI
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -28,8 +27,15 @@ def load_homepage_data(legislature):
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_bills_in_discussion(legislature):
     """Load bills currently being discussed"""
-    api = AssembleeNationaleAPI(legislature=legislature)
-    return api.get_bills_in_discussion(legislature=legislature, limit=5)
+    loader = OptimizedDataLoader(legislature=legislature)
+    return loader.get_bills_in_discussion(limit=5)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_recent_debates(legislature):
+    """Load recent debates"""
+    loader = OptimizedDataLoader(legislature=legislature)
+    return loader.get_debates_list(limit=3)
 
 
 # Custom CSS
@@ -101,22 +107,25 @@ st.markdown("## 📊 En chiffres")
 
 try:
     df_deputies, df_amendments, df_stats = load_homepage_data(legislature)
-    
+
     # Build deputy lookup for author names
     deputy_lookup = {}
     for row in df_deputies.to_dicts():
         uid = row.get("uid", "")
-        nom = row.get("nom_complet", "") or f"{row.get('prenom', '')} {row.get('nom', '')}"
+        nom = (
+            row.get("nom_complet", "")
+            or f"{row.get('prenom', '')} {row.get('nom', '')}"
+        )
         groupe = row.get("groupe_sigle", "")
         if uid:
             deputy_lookup[uid] = {"nom": nom.strip(), "groupe": groupe}
-    
+
     # Calculate stats
     total_deputies = len(df_deputies)
     total_amendments = len(df_amendments)
     groups = df_deputies["groupe_sigle"].unique().to_list()
     total_groups = len([g for g in groups if g])
-    
+
     # Success rate
     adopted = df_amendments.filter(
         df_amendments["sort"].str.contains("(?i)adopt")
@@ -149,15 +158,15 @@ st.markdown("## 🏆 Député le plus actif")
 try:
     if df_stats is not None and not df_stats.is_empty():
         top = df_stats.row(0, named=True)
-        
+
         col1, col2 = st.columns([1, 2])
-        
+
         with col1:
             st.markdown(f"### {top.get('nom_complet', 'N/A')}")
             groupe = top.get("groupe_sigle", "")
             if groupe:
                 st.caption(f"Groupe: **{groupe}**")
-        
+
         with col2:
             m1, m2, m3 = st.columns(3)
             with m1:
@@ -166,12 +175,22 @@ try:
                 st.metric("Adoptés", top.get("adoptes", 0))
             with m3:
                 st.metric("Taux de succès", f"{top.get('taux_succes', 0):.1f}%")
-        
+
         # Top 5 table
         with st.expander("Voir le Top 5"):
-            top5 = df_stats.head(5).select([
-                "nom_complet", "groupe_sigle", "total_amendements", "adoptes", "taux_succes"
-            ]).to_pandas()
+            top5 = (
+                df_stats.head(5)
+                .select(
+                    [
+                        "nom_complet",
+                        "groupe_sigle",
+                        "total_amendements",
+                        "adoptes",
+                        "taux_succes",
+                    ]
+                )
+                .to_pandas()
+            )
             top5.columns = ["Député", "Groupe", "Amendements", "Adoptés", "Taux (%)"]
             st.dataframe(top5, hide_index=True, width="stretch")
     else:
@@ -186,7 +205,7 @@ st.markdown("## 📜 Textes en cours de discussion")
 
 try:
     bills_in_discussion = load_bills_in_discussion(legislature)
-    
+
     if bills_in_discussion:
         for bill in bills_in_discussion[:5]:
             titre = bill.get("titre", "Sans titre")
@@ -195,19 +214,21 @@ try:
             uid = bill.get("uid", "")
             acteur_ref = bill.get("acteurRef")
             leg = bill.get("legislature", legislature)
-            
+
             # Get author name
             author_name = None
             if acteur_ref and acteur_ref in deputy_lookup:
                 author_info = deputy_lookup[acteur_ref]
                 author_name = author_info.get("nom")
                 author_groupe = author_info.get("groupe", "")
-            
+
             url = f"https://www.assemblee-nationale.fr/dyn/{leg}/dossiers/{uid}"
-            
+
             with st.container():
-                st.markdown(f"**[{titre[:80]}{'...' if len(titre) > 80 else ''}]({url})**")
-                
+                st.markdown(
+                    f"**[{titre[:80]}{'...' if len(titre) > 80 else ''}]({url})**"
+                )
+
                 col1, col2, col3 = st.columns([2, 2, 2])
                 with col1:
                     st.caption(f"📋 {type_texte}" if type_texte else "")
@@ -215,10 +236,13 @@ try:
                     st.caption(f"📍 {statut}" if statut else "")
                 with col3:
                     if author_name:
-                        st.caption(f"👤 {author_name}" + (f" ({author_groupe})" if author_groupe else ""))
+                        st.caption(
+                            f"👤 {author_name}"
+                            + (f" ({author_groupe})" if author_groupe else "")
+                        )
                     else:
                         st.caption("👤 Gouvernement" if not acteur_ref else "")
-                
+
                 st.markdown("---")
     else:
         st.info("Aucun texte en cours de discussion en séance publique.")
@@ -231,7 +255,7 @@ st.divider()
 # Navigation links
 st.markdown("## 🔍 Explorer")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
     st.page_link("pages/1_Députés.py", label="Députés", icon="👥")
@@ -248,6 +272,42 @@ with col3:
 with col4:
     st.page_link("pages/3_Scrutins.py", label="Scrutins", icon="🗳️")
     st.caption("Votes et résultats")
+
+with col5:
+    st.page_link("pages/5_Débats.py", label="Débats", icon="🎤")
+    st.caption("Séances publiques")
+
+st.divider()
+
+# Recent debates section
+st.markdown("## 🎤 Dernières séances")
+
+try:
+    recent_debates = load_recent_debates(legislature)
+
+    if recent_debates:
+        for debate in recent_debates:
+            date = debate.get("date", "Date inconnue")
+            sommaire = debate.get("sommaire", [])
+            nb_orateurs = debate.get("nbOrateurs", 0)
+
+            with st.container():
+                st.markdown(f"**📅 {date}**")
+
+                if sommaire:
+                    # Show first 2 agenda items
+                    for titre in sommaire[:2]:
+                        st.caption(f"• {titre[:60]}{'...' if len(titre) > 60 else ''}")
+
+                st.caption(f"👥 {nb_orateurs} intervenants")
+                st.markdown("---")
+
+        st.page_link("pages/5_Débats.py", label="Voir tous les débats →", icon="🎤")
+    else:
+        st.info("Aucun débat récent disponible.")
+
+except Exception as e:
+    st.warning(f"Impossible de charger les débats récents: {e}")
 
 st.divider()
 

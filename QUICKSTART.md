@@ -41,6 +41,18 @@ Analyze:
 - Participation rates
 - Vote breakdowns
 
+### 📊 Activité Page
+Track:
+- Deputy amendment activity
+- Success rates
+- Political group comparisons
+
+### 💬 Débats Page
+Explore:
+- Parliamentary debates
+- NLP analysis (sentiment, topics, keywords)
+- Speaker statistics
+
 ## Tips
 
 - **Search**: Use the search boxes to find specific deputies or bills

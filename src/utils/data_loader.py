@@ -248,6 +248,306 @@ class OptimizedDataLoader:
 
         return df
 
+    def get_bills_df(self) -> pl.DataFrame:
+        """Get legislative dossiers as a Polars DataFrame with Parquet caching."""
+        cache_path = self._get_cache_path("bills")
+
+        if self._is_cache_valid(cache_path):
+            print("Loading bills from Parquet cache...")
+            return pl.read_parquet(cache_path)
+
+        url = f"{self.BASE_URL}/{self.legislature}/loi/dossiers_legislatifs/Dossiers_Legislatifs.json.zip"
+        print("Fetching bills data...")
+
+        raw_data = self._load_from_json_cache(url)
+        if raw_data is None:
+            raw_data = self._download_zip(url)
+
+        bills = []
+        for item in raw_data:
+            if "dossierParlementaire" not in item:
+                continue
+
+            dossier = item["dossierParlementaire"]
+            actes = dossier.get("actesLegislatifs", {}).get("acteLegislatif")
+
+            # Find first date
+            date_depot = self._find_first_date(actes)
+
+            # Find last acte for status
+            statut = self._find_last_acte(actes)
+
+            procedure = dossier.get("procedureParlementaire", {})
+            type_texte = procedure.get("libelle", "")
+
+            bills.append(
+                {
+                    "uid": dossier.get("uid", ""),
+                    "titre": dossier.get("titreDossier", {}).get("titre", ""),
+                    "type": type_texte,
+                    "date_depot": date_depot.split("T")[0] if date_depot else "",
+                    "statut": statut,
+                    "legislature": dossier.get("legislature", self.legislature),
+                }
+            )
+
+        df = pl.DataFrame(bills)
+
+        # Convert date column
+        df = df.with_columns(
+            [
+                pl.col("date_depot")
+                .str.to_date(format="%Y-%m-%d", strict=False)
+                .alias("date_depot")
+            ]
+        )
+
+        df.write_parquet(cache_path)
+        print(f"Cached {len(df)} bills to Parquet")
+
+        return df
+
+    def get_bills_in_discussion(self, limit: int = 10) -> list:
+        """
+        Get bills currently being discussed in session.
+        Uses the cached bills DataFrame and filters for discussion status.
+        """
+        df = self.get_bills_df()
+
+        # Filter for bills in discussion (statut contains "séance" or "discussion")
+        in_discussion = df.filter(
+            pl.col("statut").str.to_lowercase().str.contains("séance|discussion")
+        ).head(limit)
+
+        return in_discussion.to_dicts()
+
+    def _find_first_date(self, actes) -> str:
+        """Recursively find the first date in legislative acts."""
+        if actes is None:
+            return ""
+        if isinstance(actes, list):
+            for acte in actes:
+                date = self._find_first_date(acte)
+                if date:
+                    return date
+        elif isinstance(actes, dict):
+            if "dateActe" in actes:
+                return actes["dateActe"]
+            nested = actes.get("actesLegislatifs", {})
+            if isinstance(nested, dict):
+                nested = nested.get("acteLegislatif")
+            return self._find_first_date(nested)
+        return ""
+
+    def _find_last_acte(self, actes) -> str:
+        """Find the last act name (current status)."""
+        if actes is None:
+            return ""
+
+        result = []
+
+        def extract(a):
+            if isinstance(a, list):
+                for item in a:
+                    extract(item)
+            elif isinstance(a, dict):
+                libelle = a.get("libelleActe", {})
+                if isinstance(libelle, dict):
+                    name = libelle.get("nomCanonique", "") or libelle.get(
+                        "libelleCourt", ""
+                    )
+                    if name:
+                        result.append(name)
+                nested = a.get("actesLegislatifs", {})
+                if isinstance(nested, dict):
+                    nested = nested.get("acteLegislatif")
+                extract(nested)
+
+        extract(actes)
+        return result[-1] if result else ""
+
+    def get_votes_df(self) -> pl.DataFrame:
+        """Get votes/scrutins as a Polars DataFrame with Parquet caching."""
+        cache_path = self._get_cache_path("votes")
+
+        if self._is_cache_valid(cache_path):
+            print("Loading votes from Parquet cache...")
+            return pl.read_parquet(cache_path)
+
+        url = f"{self.BASE_URL}/{self.legislature}/loi/scrutins/Scrutins.json.zip"
+        print("Fetching votes data...")
+
+        raw_data = self._load_from_json_cache(url)
+        if raw_data is None:
+            raw_data = self._download_zip(url)
+
+        votes = []
+        for item in raw_data:
+            if "scrutin" not in item:
+                continue
+
+            scrutin = item["scrutin"]
+            synthese = scrutin.get("syntheseVote", {})
+            decompte = synthese.get("decompte", {})
+
+            votes.append(
+                {
+                    "uid": scrutin.get("uid", ""),
+                    "numero": scrutin.get("numero", ""),
+                    "dateScrutin": scrutin.get("dateScrutin", ""),
+                    "titre": scrutin.get("titre", ""),
+                    "sort": scrutin.get("sort", {}).get("libelle", ""),
+                    "nombreVotants": int(synthese.get("nombreVotants", 0)),
+                    "pour": int(decompte.get("pour", 0)),
+                    "contre": int(decompte.get("contre", 0)),
+                    "abstention": int(decompte.get("abstentions", 0)),
+                }
+            )
+
+        df = pl.DataFrame(votes)
+        df.write_parquet(cache_path)
+        print(f"Cached {len(df)} votes to Parquet")
+
+        return df
+
+    def get_debates_df(self, limit: Optional[int] = None) -> pl.DataFrame:
+        """
+        Get debates as a Polars DataFrame with Parquet caching.
+        
+        Args:
+            limit: Max number of debates to return. None = all debates.
+        """
+        cache_path = self._get_cache_path("debates", limit if limit else "all")
+
+        # Check Parquet cache first
+        if self._is_cache_valid(cache_path):
+            print("Loading debates from Parquet cache...")
+            df = pl.read_parquet(cache_path)
+            return df.head(limit) if limit else df
+
+        print("Processing debates data...")
+        
+        url = f"{self.BASE_URL}/{self.legislature}/vp/syceronbrut/syseron.xml.zip"
+        
+        # Check for cached ZIP file
+        zip_cache_path = self.JSON_CACHE_DIR / f"syseron_{self.legislature}.xml.zip"
+        
+        if zip_cache_path.exists():
+            file_age = time.time() - zip_cache_path.stat().st_mtime
+            if file_age < self.CACHE_TTL:
+                print("Loading debates from cached ZIP...")
+                with open(zip_cache_path, 'rb') as f:
+                    zip_content = f.read()
+            else:
+                zip_content = None
+        else:
+            zip_content = None
+        
+        # Download if not cached
+        if zip_content is None:
+            print("Downloading debates XML (this may take a while)...")
+            response = self.session.get(url, timeout=300)
+            response.raise_for_status()
+            zip_content = response.content
+            # Cache for future use
+            zip_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(zip_cache_path, 'wb') as f:
+                f.write(zip_content)
+            print(f"Cached debates ZIP ({len(zip_content) / 1024 / 1024:.1f} MB)")
+
+        import xml.etree.ElementTree as ET
+        
+        debates = []
+        ns = {"cr": "http://schemas.assemblee-nationale.fr/referentiel"}
+        
+        with zipfile.ZipFile(io.BytesIO(zip_content)) as zip_file:
+            xml_files = [f for f in zip_file.namelist() if f.endswith(".xml")]
+            print(f"Processing {len(xml_files)} debate files...")
+            
+            for file_name in xml_files:
+                try:
+                    with zip_file.open(file_name) as xml_file:
+                        tree = ET.parse(xml_file)
+                        root = tree.getroot()
+                        
+                        meta = root.find("cr:metadonnees", ns)
+                        if meta is None:
+                            meta = root.find(".//metadonnees")
+                        if meta is None:
+                            continue
+                        
+                        date_seance = meta.findtext("cr:dateSeanceJour", "", ns) or meta.findtext("dateSeanceJour", "")
+                        num_seance = meta.findtext("cr:numSeance", "", ns) or meta.findtext("numSeance", "")
+                        session_txt = meta.findtext("cr:session", "", ns) or meta.findtext("session", "")
+                        
+                        # Extract sommaire
+                        sommaire_items = []
+                        sommaire_elem = meta.find("cr:sommaire", ns) or meta.find(".//sommaire")
+                        if sommaire_elem is not None:
+                            for titre_struct in sommaire_elem.findall(".//cr:titreStruct", ns) or sommaire_elem.findall(".//titreStruct"):
+                                intitule = titre_struct.find("cr:intitule", ns) or titre_struct.find("intitule")
+                                if intitule is not None and intitule.text:
+                                    titre_txt = "".join(intitule.itertext()).strip().replace("\xa0", " ")
+                                    if titre_txt and titre_txt != "0":
+                                        sommaire_items.append(titre_txt)
+                        
+                        # Count speakers and paragraphs
+                        orateurs_set = set()
+                        for orateur in root.findall(".//cr:orateur", ns) or root.findall(".//orateur"):
+                            nom = orateur.findtext("cr:nom", "", ns) or orateur.findtext("nom", "")
+                            if nom:
+                                orateurs_set.add(nom)
+                        
+                        contenu = root.find("cr:contenu", ns) or root.find(".//contenu")
+                        nb_paragraphes = 0
+                        if contenu is not None:
+                            all_text_elems = contenu.findall(".//cr:texte", ns) or contenu.findall(".//texte")
+                            nb_paragraphes = len(all_text_elems)
+                        
+                        uid = file_name.split("/")[-1].replace(".xml", "")
+                        
+                        debates.append({
+                            "uid": uid,
+                            "date": date_seance,
+                            "numSeance": num_seance,
+                            "session": session_txt,
+                            "sommaire": json.dumps(sommaire_items[:10]),  # Store as JSON string for Parquet
+                            "nbOrateurs": len(orateurs_set),
+                            "nbParagraphes": nb_paragraphes,
+                            "legislature": self.legislature,
+                        })
+                        
+                except Exception:
+                    continue
+        
+        df = pl.DataFrame(debates)
+        
+        # Sort by date descending
+        df = df.sort("date", descending=True)
+        
+        df.write_parquet(cache_path)
+        print(f"Cached {len(df)} debates to Parquet")
+        
+        return df.head(limit) if limit else df
+
+    def get_debates_list(self, limit: Optional[int] = None) -> list:
+        """
+        Get debates as a list of dicts (for compatibility with existing code).
+        Converts sommaire back from JSON string.
+        """
+        df = self.get_debates_df(limit=limit)
+        debates = df.to_dicts()
+        
+        # Convert sommaire back from JSON string to list
+        for d in debates:
+            if isinstance(d.get("sommaire"), str):
+                try:
+                    d["sommaire"] = json.loads(d["sommaire"])
+                except Exception:
+                    d["sommaire"] = []
+        
+        return debates
+
     def compute_activity_stats(
         self, df_deputies: pl.DataFrame, df_amendments: pl.DataFrame
     ) -> pl.DataFrame:

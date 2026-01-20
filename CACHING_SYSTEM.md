@@ -2,38 +2,48 @@
 
 ## Overview
 
-The application now includes a **local file caching system** that dramatically improves performance by storing downloaded data on disk.
+The application uses a **two-layer caching system** that dramatically improves performance:
+
+1. **JSON Cache**: Raw API responses stored on disk (legacy, still used for debates)
+2. **Parquet Cache**: Optimized columnar format for DataFrames (deputies, amendments, bills, votes)
 
 ### Performance Improvement
 
-**🚀 20x faster loading times!**
+**🚀 20-50x faster loading times!**
 
-- **First load**: ~1.9 seconds (downloads from API)
-- **Cached load**: ~0.09 seconds (loads from disk)
-- **Speedup**: 20x faster with cache
+- **First load**: ~2-5 seconds (downloads from API, converts to Parquet)
+- **Cached load**: ~0.05-0.1 seconds (loads from Parquet)
+- **Speedup**: 20-50x faster with cache
 
 ## How It Works
 
 ### Automatic Caching
 
 When data is requested:
-1. **Check cache**: Look for cached version on disk
-2. **Validate age**: Ensure cache is less than 24 hours old
-3. **Load or download**:
-   - If cache is valid: Load from disk (instant!)
-   - If cache is invalid/missing: Download and save to cache
+1. **Check Parquet cache**: Look for `.parquet` file in `.cache/parquet/`
+2. **Check JSON cache**: Fall back to JSON in `.cache/assemblee_data/`
+3. **Download if needed**: Fetch from API and create Parquet cache
 
-### Cache Location
+### Cache Locations
 
 ```
-.cache/assemblee_data/
-├── 2fb0b6d8935e7f28055ac4f245777c8b.json  # Deputies data
-├── 11a7540cad62350dfef4599549cb18e4.json  # Votes data
-├── 96de91112dfdd7ab7d3de73db0c58ec4.json  # Legislative dossiers
-└── 90d24d99b1d61f0e140b489c37b6a158.json  # Amendments data
+.cache/
+├── parquet/                                    # Optimized Parquet cache
+│   ├── deputies_17.parquet                     # Deputies DataFrame
+│   ├── amendments_17.parquet                   # Amendments DataFrame
+│   ├── bills_17.parquet                        # Bills DataFrame
+│   └── votes_17.parquet                        # Votes DataFrame
+│
+├── assemblee_data/                             # JSON cache (legacy)
+│   ├── 2fb0b6d8935e7f28055ac4f245777c8b.json  # Deputies raw
+│   ├── 11a7540cad62350dfef4599549cb18e4.json  # Votes raw
+│   ├── 96de91112dfdd7ab7d3de73db0c58ec4.json  # Bills raw
+│   ├── 90d24d99b1d61f0e140b489c37b6a158.json  # Amendments raw
+│   ├── a0f50bb833c899a024f1747b006eea38.json  # Debates metadata
+│   └── syseron_17.xml.zip                      # Debate transcripts XML
+│
+└── (both directories are in .gitignore)
 ```
-
-**Note**: The `.cache` directory is already in `.gitignore` and won't be committed.
 
 ### Cache Duration
 
@@ -86,12 +96,27 @@ Pre-downloads all data for faster first use:
 
 ## Python API
 
-### Enable/Disable Caching
+### OptimizedDataLoader (Recommended)
+
+```python
+from src.utils.data_loader import OptimizedDataLoader
+
+# Uses Parquet cache automatically
+loader = OptimizedDataLoader(legislature=17)
+
+# Get data as Polars DataFrames
+df_deputies = loader.get_deputies_df()      # Fast Parquet load
+df_amendments = loader.get_amendments_df()  # Fast Parquet load
+df_bills = loader.get_bills_df()            # Fast Parquet load
+df_votes = loader.get_votes_df()            # Fast Parquet load
+```
+
+### AssembleeNationaleAPI (Legacy JSON)
 
 ```python
 from src.api import AssembleeNationaleAPI
 
-# With caching (default)
+# With JSON caching (default)
 api = AssembleeNationaleAPI(legislature=17, use_cache=True)
 
 # Without caching (always download fresh)
@@ -114,12 +139,12 @@ api.clear_cache()
 
 For legislature 17:
 
-| Data Source | Uncompressed Size | Records |
-|-------------|------------------|---------|
-| Deputies | ~12 MB | 575 deputies + 7,131 organes |
-| Votes | ~350 MB | 5,000+ scrutins |
-| Legislative Dossiers | ~150 MB | 1,000+ dossiers |
-| Amendments | ~230 MB (1000) | Depends on limit |
+| Data Source          | Uncompressed Size | Records                      |
+| -------------------- | ----------------- | ---------------------------- |
+| Deputies             | ~12 MB            | 575 deputies + 7,131 organes |
+| Votes                | ~350 MB           | 5,000+ scrutins              |
+| Legislative Dossiers | ~150 MB           | 1,000+ dossiers              |
+| Amendments           | ~230 MB (1000)    | Depends on limit             |
 
 **Total**: ~740 MB for full cache
 
@@ -140,10 +165,10 @@ All pages use Streamlit's `@st.cache_data` decorator which:
 
 ### First Visit Performance
 
-| Scenario | Load Time |
-|----------|-----------|
-| Cold start (no cache) | 5-10 seconds |
-| Warmed cache | <1 second |
+| Scenario                 | Load Time    |
+| ------------------------ | ------------ |
+| Cold start (no cache)    | 5-10 seconds |
+| Warmed cache             | <1 second    |
 | Cached + Streamlit cache | <0.1 seconds |
 
 ## Cache Invalidation

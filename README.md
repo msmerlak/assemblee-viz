@@ -25,6 +25,21 @@ Une application web interactive pour explorer et visualiser le travail législat
 - Évolution temporelle des scrutins
 - Répartition détaillée des votes (pour/contre/abstentions)
 
+### 📊 Activité
+- Classement des députés par nombre d'amendements
+- Taux de succès des amendements (adoptés vs rejetés)
+- Statistiques par groupe politique
+- Recherche détaillée par député
+
+### 💬 Débats
+- Liste des débats parlementaires récents
+- **Analyse NLP** des discours :
+  - Analyse de sentiment (positif/négatif/neutre)
+  - Détection de thèmes (économie, santé, sécurité, etc.)
+  - Extraction de mots-clés
+  - Reconnaissance d'entités (personnes, organisations, lieux)
+  - Statistiques par orateur
+
 ## Installation
 
 ### Prérequis
@@ -108,6 +123,7 @@ Le cache expire automatiquement après 24 heures. Voir `CACHING_SYSTEM.md` pour 
 assemblee-viz/
 ├── app.py                          # Application principale
 ├── requirements.txt                # Dépendances Python
+├── cache_manager.py                # Gestion du cache
 ├── README.md                       # Ce fichier
 │
 ├── src/
@@ -115,14 +131,21 @@ assemblee-viz/
 │   │   ├── __init__.py
 │   │   └── assemblee_client.py    # Client API Assemblée Nationale
 │   │
+│   ├── nlp/
+│   │   ├── __init__.py
+│   │   └── debate_analyzer.py     # Analyse NLP des débats
+│   │
 │   └── utils/
 │       ├── __init__.py
+│       ├── data_loader.py         # Chargement optimisé avec cache Parquet
 │       └── data_processing.py     # Fonctions de traitement des données
 │
 └── pages/
     ├── 1_Députés.py               # Page des députés
     ├── 2_Législation.py           # Page de la législation
-    └── 3_Scrutins.py              # Page des scrutins
+    ├── 3_Scrutins.py              # Page des scrutins
+    ├── 4_Activité.py              # Page d'activité des députés
+    └── 5_Débats.py                # Page des débats avec analyse NLP
 ```
 
 ## Source des données
@@ -208,10 +231,9 @@ Pour toute question ou problème :
 ## Améliorations futures
 
 Fonctionnalités potentielles à développer :
-- Analyse des amendements
-- Visualisations des débats parlementaires
 - Comparaisons inter-législatures
-- Analyse des thématiques par traitement du langage naturel
 - Export de rapports PDF
 - Filtres de dates avancés
 - Graphiques de réseau des co-signatures
+- Analyse de sentiment avec modèles ML (CamemBERT)
+- Détection automatique des sujets controversés

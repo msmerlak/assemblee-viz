@@ -7,28 +7,28 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from src.api import AssembleeNationaleAPI
+from src.utils.data_loader import OptimizedDataLoader
 from src.utils import votes_to_dataframe, calculate_vote_statistics
 
 st.set_page_config(
     page_title="Scrutins - Assemblée Nationale", page_icon="🗳️", layout="wide"
 )
 
-# Initialize API client
-if "api_client" not in st.session_state:
-    st.session_state.api_client = AssembleeNationaleAPI(legislature=17)
+# Initialize loader
+legislature = 17
 
 st.title("🗳️ Scrutins")
-st.markdown(f"**Législature**: {st.session_state.api_client.legislature}")
+st.markdown(f"**Législature**: {legislature}")
 
 
 # Load data
 @st.cache_data(ttl=3600)
 def load_votes(legislature):
-    """Load votes data with caching"""
-    api = AssembleeNationaleAPI(legislature=legislature)
-    votes = api.get_votes(limit=None)  # All votes
-    return votes_to_dataframe(votes, legislature=legislature), votes
+    """Load votes data with Parquet caching"""
+    loader = OptimizedDataLoader(legislature=legislature)
+    df = loader.get_votes_df()
+    # Convert to pandas for compatibility with existing code
+    return df.to_pandas(), df.to_dicts()
 
 
 # Sidebar controls
@@ -38,7 +38,7 @@ with st.sidebar:
 
 with st.spinner("Chargement des scrutins..."):
     try:
-        df_votes, raw_votes = load_votes(st.session_state.api_client.legislature)
+        df_votes, raw_votes = load_votes(legislature)
 
         if df_votes.empty:
             st.warning("Aucun scrutin disponible pour cette législature.")
@@ -398,7 +398,7 @@ with st.spinner("Chargement des scrutins..."):
                 # Format date column
                 if "date" in display_df.columns:
                     display_df["date"] = display_df["date"].dt.strftime("%d/%m/%Y")
-                
+
                 display_df = display_df.rename(columns=column_names)
 
                 st.dataframe(
@@ -410,9 +410,9 @@ with st.spinner("Chargement des scrutins..."):
                         "Lien": st.column_config.LinkColumn(
                             "Lien",
                             display_text="Voir ↗",
-                            help="Ouvrir le scrutin sur assemblee-nationale.fr"
+                            help="Ouvrir le scrutin sur assemblee-nationale.fr",
                         )
-                    }
+                    },
                 )
 
                 # Download button

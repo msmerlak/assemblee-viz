@@ -11,6 +11,7 @@ import io
 import os
 import hashlib
 import time
+import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional
 from pathlib import Path
 
@@ -251,7 +252,9 @@ class AssembleeNationaleAPI:
         if isinstance(actes, dict):
             libelle = actes.get("libelleActe", {})
             if isinstance(libelle, dict):
-                libelle = libelle.get("nomCanonique", "") or libelle.get("libelleCourt", "")
+                libelle = libelle.get("nomCanonique", "") or libelle.get(
+                    "libelleCourt", ""
+                )
             if libelle:
                 result.append(libelle)
             nested = actes.get("actesLegislatifs", {})
@@ -292,11 +295,11 @@ class AssembleeNationaleAPI:
                 # Extract date from nested actesLegislatifs
                 actes = dossier.get("actesLegislatifs", {}).get("acteLegislatif")
                 date_depot = self._find_first_date(actes)
-                
+
                 # Get procedure type (e.g., "Proposition de loi ordinaire")
                 procedure = dossier.get("procedureParlementaire", {})
                 type_texte = procedure.get("libelle", "")
-                
+
                 # Get current stage from last acte (e.g., "Renvoi en commission")
                 statut = self._find_last_acte(actes)
 
@@ -315,21 +318,23 @@ class AssembleeNationaleAPI:
         print(f"Loaded {len(bills)} legislative dossiers")
         return bills
 
-    def get_bills_in_discussion(self, legislature: Optional[int] = None, limit: int = 10) -> List[Dict]:
+    def get_bills_in_discussion(
+        self, legislature: Optional[int] = None, limit: int = 10
+    ) -> List[Dict]:
         """
         Get bills currently being discussed in session (séance publique)
-        
+
         Args:
             legislature: Legislature number
             limit: Max number of results
-            
+
         Returns:
             List of bills in discussion with author info
         """
         leg = legislature or self.legislature
         url = f"{self.BASE_URL}/{leg}/loi/dossiers_legislatifs/Dossiers_Legislatifs.json.zip"
         raw_data = self._download_and_extract_zip(url)
-        
+
         in_discussion = []
         for item in raw_data:
             if len(in_discussion) >= limit:
@@ -338,32 +343,38 @@ class AssembleeNationaleAPI:
                 dossier = item["dossierParlementaire"]
                 actes = dossier.get("actesLegislatifs", {}).get("acteLegislatif")
                 statut = self._find_last_acte(actes)
-                
+
                 # Check if in discussion/debate
                 if "séance" in statut.lower() or "discussion" in statut.lower():
                     uid = dossier.get("uid", "")
                     titre = dossier.get("titreDossier", {}).get("titre", "")
                     procedure = dossier.get("procedureParlementaire", {})
                     type_texte = procedure.get("libelle", "")
-                    
+
                     # Get author reference
                     initiateur = dossier.get("initiateur", {})
-                    acteurs = initiateur.get("acteurs", {}).get("acteur") if initiateur else None
+                    acteurs = (
+                        initiateur.get("acteurs", {}).get("acteur")
+                        if initiateur
+                        else None
+                    )
                     acteur_ref = None
                     if isinstance(acteurs, dict):
                         acteur_ref = acteurs.get("acteurRef")
                     elif isinstance(acteurs, list) and acteurs:
                         acteur_ref = acteurs[0].get("acteurRef")
-                    
-                    in_discussion.append({
-                        "uid": uid,
-                        "titre": titre,
-                        "type": type_texte,
-                        "statut": statut,
-                        "acteurRef": acteur_ref,
-                        "legislature": leg,
-                    })
-        
+
+                    in_discussion.append(
+                        {
+                            "uid": uid,
+                            "titre": titre,
+                            "type": type_texte,
+                            "statut": statut,
+                            "acteurRef": acteur_ref,
+                            "legislature": leg,
+                        }
+                    )
+
         return in_discussion
 
     def get_bill_details(self, bill_uid: str) -> Dict:
@@ -484,6 +495,290 @@ class AssembleeNationaleAPI:
             List of session data dictionaries
         """
         return []
+
+    def get_debates(
+        self, legislature: Optional[int] = None, limit: Optional[int] = None
+    ) -> List[Dict]:
+        """
+        Get list of parliamentary debates (compte-rendus des séances)
+
+        Args:
+            legislature: Legislature number (uses instance default if not provided)
+            limit: Maximum number of results
+
+        Returns:
+            List of debate data dictionaries
+        """
+        leg = legislature or self.legislature
+
+        # URL for debates (XML format)
+        url = f"{self.BASE_URL}/{leg}/vp/syceronbrut/syseron.xml.zip"
+
+        # Check cache first
+        cache_path = self._get_cache_path(url + "_debates")
+        if self.use_cache and self._is_cache_valid(cache_path):
+            print(f"Loading debates from cache: {cache_path.name}")
+            cached_data = self._load_from_cache(cache_path)
+            if cached_data is not None:
+                return cached_data[:limit] if limit else cached_data
+
+        print(f"Fetching debates data...")
+        try:
+            response = self.session.get(url, timeout=120)
+            response.raise_for_status()
+
+            debates = []
+            ns = {"cr": "http://schemas.assemblee-nationale.fr/referentiel"}
+
+            with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
+                xml_files = [f for f in zip_file.namelist() if f.endswith(".xml")]
+                print(f"Found {len(xml_files)} debate files")
+
+                for file_name in xml_files:
+                    try:
+                        with zip_file.open(file_name) as xml_file:
+                            tree = ET.parse(xml_file)
+                            root = tree.getroot()
+
+                            # Extract metadata with namespace
+                            meta = root.find("cr:metadonnees", ns)
+                            if meta is None:
+                                meta = root.find(".//metadonnees")
+                            if meta is None:
+                                continue
+
+                            date_seance = meta.findtext(
+                                "cr:dateSeanceJour", "", ns
+                            ) or meta.findtext("dateSeanceJour", "")
+                            num_seance = meta.findtext(
+                                "cr:numSeance", "", ns
+                            ) or meta.findtext("numSeance", "")
+                            session_txt = meta.findtext(
+                                "cr:session", "", ns
+                            ) or meta.findtext("session", "")
+
+                            # Extract sommaire (agenda items)
+                            sommaire_items = []
+                            sommaire_elem = meta.find("cr:sommaire", ns) or meta.find(
+                                ".//sommaire"
+                            )
+                            if sommaire_elem is not None:
+                                for titre_struct in sommaire_elem.findall(
+                                    ".//cr:titreStruct", ns
+                                ) or sommaire_elem.findall(".//titreStruct"):
+                                    intitule = titre_struct.find(
+                                        "cr:intitule", ns
+                                    ) or titre_struct.find("intitule")
+                                    if intitule is not None and intitule.text:
+                                        titre_txt = "".join(intitule.itertext()).strip()
+                                        titre_txt = titre_txt.replace("\xa0", " ")
+                                        if titre_txt and titre_txt != "0":
+                                            sommaire_items.append(titre_txt)
+
+                            # Extract speakers
+                            orateurs = []
+                            for orateur in root.findall(
+                                ".//cr:orateur", ns
+                            ) or root.findall(".//orateur"):
+                                nom = orateur.findtext(
+                                    "cr:nom", "", ns
+                                ) or orateur.findtext("nom", "")
+                                orateur_id = orateur.findtext(
+                                    "cr:id", "", ns
+                                ) or orateur.findtext("id", "")
+                                if nom and nom not in [o["nom"] for o in orateurs]:
+                                    orateurs.append({"nom": nom, "id": orateur_id})
+
+                            # Count text elements
+                            contenu = root.find("cr:contenu", ns) or root.find(
+                                ".//contenu"
+                            )
+                            nb_paragraphes = 0
+                            preview_text = []
+
+                            if contenu is not None:
+                                all_text_elems = contenu.findall(
+                                    ".//cr:texte", ns
+                                ) or contenu.findall(".//texte")
+                                nb_paragraphes = len(all_text_elems)
+                                for elem in all_text_elems[:5]:
+                                    if elem.text:
+                                        preview_text.append(elem.text.strip())
+
+                            uid = file_name.split("/")[-1].replace(".xml", "")
+
+                            debate_info = {
+                                "uid": uid,
+                                "date": date_seance,
+                                "numSeance": num_seance,
+                                "session": session_txt,
+                                "sommaire": sommaire_items[:10],
+                                "orateurs": orateurs[:20],
+                                "nbOrateurs": len(orateurs),
+                                "nbParagraphes": nb_paragraphes,
+                                "preview": " ".join(preview_text)[:500],
+                                "legislature": leg,
+                            }
+                            debates.append(debate_info)
+
+                    except ET.ParseError as e:
+                        print(f"XML parse error for {file_name}: {e}")
+                        continue
+
+            debates.sort(key=lambda x: x.get("date", ""), reverse=True)
+
+            if self.use_cache and debates:
+                self._save_to_cache(cache_path, debates)
+                print(f"Saved {len(debates)} debates to cache")
+
+            print(f"Loaded {len(debates)} debates")
+            return debates[:limit] if limit else debates
+
+        except requests.exceptions.RequestException as e:
+            print(f"Download failed: {e}")
+            return []
+        except Exception as e:
+            print(f"Extraction failed: {e}")
+            return []
+
+    def get_debate_full_text(
+        self, debate_uid: str, legislature: Optional[int] = None
+    ) -> Optional[Dict]:
+        """
+        Get the full text of a specific debate
+
+        Args:
+            debate_uid: The unique identifier of the debate
+            legislature: Legislature number
+
+        Returns:
+            Full debate data with text content
+        """
+        leg = legislature or self.legislature
+        url = f"{self.BASE_URL}/{leg}/vp/syceronbrut/syseron.xml.zip"
+
+        # Cache the large XML ZIP file locally
+        cache_file = self.CACHE_DIR / f"syseron_{leg}.xml.zip"
+
+        try:
+            # Check if we have a cached copy (valid for 24h)
+            if cache_file.exists():
+                file_age = time.time() - cache_file.stat().st_mtime
+                if file_age < self.CACHE_TTL:
+                    print(f"Loading debate XML from local cache...")
+                    with open(cache_file, "rb") as f:
+                        zip_content = f.read()
+                else:
+                    zip_content = None
+            else:
+                zip_content = None
+
+            # Download if not cached
+            if zip_content is None:
+                print(f"Downloading debate XML (this may take a while)...")
+                # Retry logic with increasing timeout
+                for attempt in range(3):
+                    try:
+                        timeout = 120 * (attempt + 1)  # 120s, 240s, 360s
+                        response = self.session.get(url, timeout=timeout)
+                        response.raise_for_status()
+                        zip_content = response.content
+                        # Cache for future use
+                        cache_file.parent.mkdir(parents=True, exist_ok=True)
+                        with open(cache_file, "wb") as f:
+                            f.write(zip_content)
+                        print(
+                            f"Cached debate XML ({len(zip_content) / 1024 / 1024:.1f} MB)"
+                        )
+                        break
+                    except requests.exceptions.Timeout:
+                        if attempt < 2:
+                            print(f"Timeout on attempt {attempt + 1}, retrying...")
+                            time.sleep(5)
+                        else:
+                            raise
+                    except requests.exceptions.HTTPError as e:
+                        if e.response.status_code in (502, 503, 504) and attempt < 2:
+                            print(
+                                f"Server error {e.response.status_code}, retrying in 10s..."
+                            )
+                            time.sleep(10)
+                        else:
+                            raise
+
+            ns = {"cr": "http://schemas.assemblee-nationale.fr/referentiel"}
+
+            with zipfile.ZipFile(io.BytesIO(zip_content)) as zip_file:
+                # Find the file - might be in subfolder
+                target_file = None
+                for name in zip_file.namelist():
+                    if name.endswith(f"{debate_uid}.xml"):
+                        target_file = name
+                        break
+
+                if target_file is None:
+                    print(f"File {debate_uid}.xml not found in ZIP")
+                    return None
+
+                with zip_file.open(target_file) as xml_file:
+                    tree = ET.parse(xml_file)
+                    root = tree.getroot()
+
+                    paragraphes = []
+                    contenu = root.find("cr:contenu", ns) or root.find(".//contenu")
+
+                    if contenu is not None:
+                        # Look for paragraphe elements with namespace
+                        paras = contenu.findall(".//cr:paragraphe", ns)
+                        if not paras:
+                            paras = contenu.findall(".//paragraphe")
+
+                        for p in paras:
+                            orateur = p.find("cr:orateur", ns) or p.find("orateur")
+                            orateur_nom = ""
+                            if orateur is not None:
+                                orateur_nom = (
+                                    orateur.findtext("cr:nom", "", ns)
+                                    or orateur.findtext("nom", "")
+                                    or "".join(orateur.itertext()).strip()
+                                )
+
+                            texte_elem = p.find("cr:texte", ns) or p.find("texte")
+                            if texte_elem is not None:
+                                texte = "".join(texte_elem.itertext()).strip()
+                            else:
+                                texte = "".join(p.itertext()).strip()
+                                if orateur_nom and texte.startswith(orateur_nom):
+                                    texte = texte[len(orateur_nom) :].strip()
+
+                            if texte:
+                                paragraphes.append(
+                                    {"orateur": orateur_nom, "texte": texte}
+                                )
+
+                    # Fallback: extract from texte elements directly
+                    if not paragraphes:
+                        for texte_elem in root.findall(
+                            ".//cr:texte", ns
+                        ) or root.findall(".//texte"):
+                            texte = "".join(texte_elem.itertext()).strip()
+                            if texte and len(texte) > 20:
+                                paragraphes.append({"orateur": "", "texte": texte})
+
+                    print(f"Extracted {len(paragraphes)} paragraphs from {debate_uid}")
+
+                    return {
+                        "uid": debate_uid,
+                        "paragraphes": paragraphes,
+                        "nbParagraphes": len(paragraphes),
+                    }
+
+        except Exception as e:
+            print(f"Error fetching debate text: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return None
 
     def get_amendments(
         self, legislature: Optional[int] = None, limit: int = 1000
